@@ -1,84 +1,63 @@
 (function () {
     'use strict';
 
-    var PLUGIN_NAME = 'RatingSort';
-    var PLUGIN_VERSION = '2.0.0';
+    var VERSION = '3.0.0';
     var sortActive = false;
 
     // ── Витягнути рейтинг з картки ────────────────────────────────────────────
+    // Реальний клас в Lampa: .card__vote
 
-    function getVoteFromCard(el) {
-        // 1) data-атрибути
-        var v = parseFloat(el.dataset.vote || el.dataset.rating || 0);
-        if (v > 0) return v;
-
-        // 2) Текст всередині картки (.card__vote, .vote, .card__rating)
-        var voteEl = el.querySelector('.card__vote') ||
-                     el.querySelector('.vote') ||
-                     el.querySelector('.card__rating') ||
-                     el.querySelector('[class*="vote"]') ||
-                     el.querySelector('[class*="rating"]');
+    function getVote(cardEl) {
+        var voteEl = cardEl.querySelector('.card__vote');
         if (voteEl) {
-            v = parseFloat(voteEl.textContent.trim());
-            if (v > 0) return v;
+            var v = parseFloat(voteEl.textContent.trim());
+            if (!isNaN(v) && v > 0) return v;
         }
-
-        // 3) Будь-який елемент з числом у форматі X.X
-        var allSpans = el.querySelectorAll('span, div');
-        for (var i = 0; i < allSpans.length; i++) {
-            var txt = allSpans[i].textContent.trim();
-            var match = txt.match(/^(\d+\.\d+)$/);
-            if (match) {
-                v = parseFloat(match[1]);
-                if (v > 0 && v <= 10) return v;
-            }
-        }
-
         return 0;
     }
 
-    // ── Відсортувати картки у контейнері ──────────────────────────────────────
+    // ── Відсортувати один горизонтальний ряд ──────────────────────────────────
+    // Контейнер: .items-line__body > .scroll > .scroll__body
+    // Картки всередині: .card
 
-    function sortContainer(container) {
-        if (!container) return;
-
-        var cards = Array.from(container.children).filter(function (el) {
-            return el.classList.contains('card') ||
-                   el.classList.contains('item') ||
-                   el.querySelector('.card__poster') ||
-                   el.querySelector('.card__vote') ||
-                   el.querySelector('[class*="vote"]');
-        });
-
+    function sortScrollBody(scrollBody) {
+        var cards = Array.from(scrollBody.querySelectorAll(':scope > .card'));
         if (cards.length < 2) return;
 
-        var rated = cards.map(function (el) {
-            return { el: el, vote: getVoteFromCard(el) };
+        var withRating = cards.map(function (el) {
+            return { el: el, vote: getVote(el) };
         });
 
-        rated.sort(function (a, b) { return b.vote - a.vote; });
+        withRating.sort(function (a, b) { return b.vote - a.vote; });
 
-        rated.forEach(function (item) {
-            container.appendChild(item.el);
+        withRating.forEach(function (item) {
+            scrollBody.appendChild(item.el);
         });
     }
 
-    // ── Знайти всі контейнери і відсортувати ──────────────────────────────────
+    // ── Відсортувати всі ряди на екрані ──────────────────────────────────────
 
     function applySort() {
         if (!sortActive) return;
 
-        var containers = document.querySelectorAll(
-            '.items-list, .catalog__items, .selectbox-list, ' +
-            '.category-full__content, .full-start__items, ' +
-            '.scroll__body, [class*="items"], [class*="catalog"]'
-        );
+        // Горизонтальні ряди (головна сторінка)
+        document.querySelectorAll('.scroll__body').forEach(function (sb) {
+            if (sb.querySelector('.card__vote')) {
+                sortScrollBody(sb);
+            }
+        });
 
-        containers.forEach(function (container) {
-            var hasVotes = container.querySelector(
-                '.card__vote, .vote, [class*="vote"], [class*="rating"]'
-            );
-            if (hasVotes) sortContainer(container);
+        // Каталог (сітка)
+        document.querySelectorAll('.items-list, .catalog__items').forEach(function (container) {
+            var cards = Array.from(container.querySelectorAll(':scope > .card'));
+            if (cards.length < 2) return;
+
+            var withRating = cards.map(function (el) {
+                return { el: el, vote: getVote(el) };
+            });
+
+            withRating.sort(function (a, b) { return b.vote - a.vote; });
+            withRating.forEach(function (item) { container.appendChild(item.el); });
         });
     }
 
@@ -109,12 +88,8 @@
 
         btn.addEventListener('click', function () {
             sortActive = !sortActive;
-            btn.style.background = sortActive
-                ? 'rgba(76,175,80,.95)'
-                : 'rgba(20,20,20,.9)';
-            btn.style.borderColor = sortActive
-                ? '#4caf50'
-                : 'rgba(255,255,255,.3)';
+            btn.style.background = sortActive ? 'rgba(76,175,80,.95)' : 'rgba(20,20,20,.9)';
+            btn.style.borderColor = sortActive ? '#4caf50' : 'rgba(255,255,255,.3)';
             btn.textContent = sortActive ? '★ Сортування: ВКЛ' : '★ Рейтинг';
             if (sortActive) applySort();
         });
@@ -132,19 +107,19 @@
 
         createButton();
 
-        if (Lampa.Listener) {
-            Lampa.Listener.follow('full', function () {
-                if (sortActive) setTimeout(applySort, 500);
-            });
-        }
+        // Подія після рендеру будь-якого компонента
+        Lampa.Listener.follow('full', function (e) {
+            if (sortActive) setTimeout(applySort, 600);
+        });
 
+        // Хук на дані API — сортує до рендеру (найефективніший спосіб)
         if (Lampa.Arrays && Lampa.Arrays.extend) {
             var _extend = Lampa.Arrays.extend;
             Lampa.Arrays.extend = function (target, items) {
                 if (sortActive && Array.isArray(items) && items.length) {
                     items = items.slice().sort(function (a, b) {
-                        var ra = parseFloat(a.vote_average || (a.rating && a.rating.tmdb) || 0);
-                        var rb = parseFloat(b.vote_average || (b.rating && b.rating.tmdb) || 0);
+                        var ra = parseFloat(a.vote_average || 0);
+                        var rb = parseFloat(b.vote_average || 0);
                         return rb - ra;
                     });
                 }
@@ -152,33 +127,34 @@
             };
         }
 
+        // MutationObserver — реагує на появу нових .card__vote елементів
         var timer;
-        var obs = new MutationObserver(function (muts) {
+        new MutationObserver(function (muts) {
             if (!sortActive) return;
-            var hasCards = muts.some(function (m) {
+            var hasNew = muts.some(function (m) {
                 return Array.from(m.addedNodes).some(function (n) {
                     return n.nodeType === 1 && (
-                        n.classList.contains('card') ||
-                        (n.querySelector && n.querySelector('.card__vote, [class*="vote"]'))
+                        n.classList && n.classList.contains('card') ||
+                        n.querySelector && n.querySelector('.card__vote')
                     );
                 });
             });
-            if (hasCards) {
+            if (hasNew) {
                 clearTimeout(timer);
-                timer = setTimeout(applySort, 400);
+                timer = setTimeout(applySort, 500);
             }
-        });
+        }).observe(document.body, { childList: true, subtree: true });
 
-        obs.observe(document.body, { childList: true, subtree: true });
-
-        console.log('[RatingSort] v' + PLUGIN_VERSION + ' готовий');
+        console.log('[RatingSort] v' + VERSION + ' готовий. Класи: .card, .card__vote, .scroll__body');
     }
+
+    // ── Реєстрація ───────────────────────────────────────────────────────────
 
     if (typeof Lampa !== 'undefined' && Lampa.Plugin) {
         Lampa.Plugin.add({
             name: 'rating_sort',
-            version: PLUGIN_VERSION,
-            description: 'Сортування фільмів за рейтингом',
+            version: VERSION,
+            description: 'Сортування фільмів за рейтингом від вищого до нижчого',
             type: 'other',
             start: hookLampa
         });
