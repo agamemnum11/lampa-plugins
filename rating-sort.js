@@ -1,67 +1,44 @@
 (function () {
     'use strict';
 
-    var VERSION = '3.0.0';
+    var VERSION = '4.0.0';
     var sortActive = false;
 
-    // ── Витягнути рейтинг з картки ────────────────────────────────────────────
-    // Реальний клас в Lampa: .card__vote
+    // Структура DOM (перевірено):
+    // .scroll__body.mapping--line  ← контейнер рядка
+    //   .card                      ← картка
+    //     .card__view
+    //       .card__vote            ← рейтинг "6.7"
 
     function getVote(cardEl) {
-        var voteEl = cardEl.querySelector('.card__vote');
-        if (voteEl) {
-            var v = parseFloat(voteEl.textContent.trim());
-            if (!isNaN(v) && v > 0) return v;
-        }
-        return 0;
+        var el = cardEl.querySelector('.card__vote');
+        if (!el) return 0;
+        var v = parseFloat(el.textContent.trim());
+        return isNaN(v) ? 0 : v;
     }
 
-    // ── Відсортувати один горизонтальний ряд ──────────────────────────────────
-    // Контейнер: .items-line__body > .scroll > .scroll__body
-    // Картки всередині: .card
-
-    function sortScrollBody(scrollBody) {
-        var cards = Array.from(scrollBody.querySelectorAll(':scope > .card'));
+    function sortContainer(container) {
+        var cards = Array.from(container.querySelectorAll(':scope > .card'));
         if (cards.length < 2) return;
 
-        var withRating = cards.map(function (el) {
-            return { el: el, vote: getVote(el) };
+        cards.sort(function (a, b) {
+            return getVote(b) - getVote(a);
         });
 
-        withRating.sort(function (a, b) { return b.vote - a.vote; });
-
-        withRating.forEach(function (item) {
-            scrollBody.appendChild(item.el);
-        });
+        cards.forEach(function (c) { container.appendChild(c); });
     }
-
-    // ── Відсортувати всі ряди на екрані ──────────────────────────────────────
 
     function applySort() {
         if (!sortActive) return;
 
-        // Горизонтальні ряди (головна сторінка)
-        document.querySelectorAll('.scroll__body').forEach(function (sb) {
-            if (sb.querySelector('.card__vote')) {
-                sortScrollBody(sb);
-            }
-        });
+        // Горизонтальні ряди: .scroll__body.mapping--line
+        document.querySelectorAll('.scroll__body.mapping--line').forEach(sortContainer);
 
-        // Каталог (сітка)
-        document.querySelectorAll('.items-list, .catalog__items').forEach(function (container) {
-            var cards = Array.from(container.querySelectorAll(':scope > .card'));
-            if (cards.length < 2) return;
-
-            var withRating = cards.map(function (el) {
-                return { el: el, vote: getVote(el) };
-            });
-
-            withRating.sort(function (a, b) { return b.vote - a.vote; });
-            withRating.forEach(function (item) { container.appendChild(item.el); });
-        });
+        // Каталог (сітка фільмів)
+        document.querySelectorAll('.items-list').forEach(sortContainer);
     }
 
-    // ── Кнопка ────────────────────────────────────────────────────────────────
+    // ── Кнопка ───────────────────────────────────────────────────────────────
 
     function createButton() {
         if (document.getElementById('rs-btn')) return;
@@ -97,7 +74,7 @@
         document.body.appendChild(btn);
     }
 
-    // ── Підписка на події Lampa ───────────────────────────────────────────────
+    // ── Хуки Lampa ───────────────────────────────────────────────────────────
 
     function hookLampa() {
         if (typeof Lampa === 'undefined') {
@@ -107,35 +84,33 @@
 
         createButton();
 
-        // Подія після рендеру будь-якого компонента
-        Lampa.Listener.follow('full', function (e) {
+        // Після кожного рендеру сторінки
+        Lampa.Listener.follow('full', function () {
             if (sortActive) setTimeout(applySort, 600);
         });
 
-        // Хук на дані API — сортує до рендеру (найефективніший спосіб)
+        // Сортування даних до рендеру
         if (Lampa.Arrays && Lampa.Arrays.extend) {
             var _extend = Lampa.Arrays.extend;
             Lampa.Arrays.extend = function (target, items) {
                 if (sortActive && Array.isArray(items) && items.length) {
                     items = items.slice().sort(function (a, b) {
-                        var ra = parseFloat(a.vote_average || 0);
-                        var rb = parseFloat(b.vote_average || 0);
-                        return rb - ra;
+                        return parseFloat(b.vote_average || 0) - parseFloat(a.vote_average || 0);
                     });
                 }
                 return _extend.call(this, target, items);
             };
         }
 
-        // MutationObserver — реагує на появу нових .card__vote елементів
+        // Реакція на появу нових карток
         var timer;
         new MutationObserver(function (muts) {
             if (!sortActive) return;
             var hasNew = muts.some(function (m) {
                 return Array.from(m.addedNodes).some(function (n) {
                     return n.nodeType === 1 && (
-                        n.classList && n.classList.contains('card') ||
-                        n.querySelector && n.querySelector('.card__vote')
+                        (n.classList && n.classList.contains('card')) ||
+                        (n.querySelector && n.querySelector('.card__vote'))
                     );
                 });
             });
@@ -145,7 +120,7 @@
             }
         }).observe(document.body, { childList: true, subtree: true });
 
-        console.log('[RatingSort] v' + VERSION + ' готовий. Класи: .card, .card__vote, .scroll__body');
+        console.log('[RatingSort] v' + VERSION + ' готовий');
     }
 
     // ── Реєстрація ───────────────────────────────────────────────────────────
@@ -154,7 +129,7 @@
         Lampa.Plugin.add({
             name: 'rating_sort',
             version: VERSION,
-            description: 'Сортування фільмів за рейтингом від вищого до нижчого',
+            description: 'Сортування фільмів за рейтингом',
             type: 'other',
             start: hookLampa
         });
