@@ -2,268 +2,189 @@
     'use strict';
 
     var PLUGIN_NAME = 'RatingSort';
-    var PLUGIN_VERSION = '1.0.0';
+    var PLUGIN_VERSION = '2.0.0';
+    var sortActive = false;
 
-    // ── Utility ──────────────────────────────────────────────────────────────
+    // ── Витягнути рейтинг з картки ────────────────────────────────────────────
 
-    function getRating(item) {
-        // Lampa stores ratings in different fields depending on source
-        var vote = parseFloat(
-            item.vote_average ||
-            (item.rating && item.rating.imdb) ||
-            (item.rating && item.rating.tmdb) ||
-            item.imdb_id_rating ||
-            0
-        );
-        return isNaN(vote) ? 0 : vote;
+    function getVoteFromCard(el) {
+        // 1) data-атрибути
+        var v = parseFloat(el.dataset.vote || el.dataset.rating || 0);
+        if (v > 0) return v;
+
+        // 2) Текст всередині картки (.card__vote, .vote, .card__rating)
+        var voteEl = el.querySelector('.card__vote') ||
+                     el.querySelector('.vote') ||
+                     el.querySelector('.card__rating') ||
+                     el.querySelector('[class*="vote"]') ||
+                     el.querySelector('[class*="rating"]');
+        if (voteEl) {
+            v = parseFloat(voteEl.textContent.trim());
+            if (v > 0) return v;
+        }
+
+        // 3) Будь-який елемент з числом у форматі X.X
+        var allSpans = el.querySelectorAll('span, div');
+        for (var i = 0; i < allSpans.length; i++) {
+            var txt = allSpans[i].textContent.trim();
+            var match = txt.match(/^(\d+\.\d+)$/);
+            if (match) {
+                v = parseFloat(match[1]);
+                if (v > 0 && v <= 10) return v;
+            }
+        }
+
+        return 0;
     }
 
-    function sortByRating(items) {
-        return items.slice().sort(function (a, b) {
-            return getRating(b) - getRating(a);
+    // ── Відсортувати картки у контейнері ──────────────────────────────────────
+
+    function sortContainer(container) {
+        if (!container) return;
+
+        var cards = Array.from(container.children).filter(function (el) {
+            return el.classList.contains('card') ||
+                   el.classList.contains('item') ||
+                   el.querySelector('.card__poster') ||
+                   el.querySelector('.card__vote') ||
+                   el.querySelector('[class*="vote"]');
+        });
+
+        if (cards.length < 2) return;
+
+        var rated = cards.map(function (el) {
+            return { el: el, vote: getVoteFromCard(el) };
+        });
+
+        rated.sort(function (a, b) { return b.vote - a.vote; });
+
+        rated.forEach(function (item) {
+            container.appendChild(item.el);
         });
     }
 
-    function addRatingBadge(element, rating) {
-        if (!element || rating <= 0) return;
-        if (element.querySelector('.rs-badge')) return;
+    // ── Знайти всі контейнери і відсортувати ──────────────────────────────────
 
-        var color = rating >= 7 ? '#4caf50' : rating >= 5 ? '#ff9800' : '#f44336';
-        var badge = document.createElement('div');
-        badge.className = 'rs-badge';
-        badge.style.cssText = [
-            'position:absolute',
-            'top:6px',
-            'right:6px',
-            'background:' + color,
-            'color:#fff',
-            'font-size:13px',
-            'font-weight:600',
-            'padding:2px 7px',
-            'border-radius:4px',
-            'z-index:10',
-            'pointer-events:none',
-            'box-shadow:0 1px 4px rgba(0,0,0,.5)'
-        ].join(';');
-        badge.textContent = rating.toFixed(1);
+    function applySort() {
+        if (!sortActive) return;
 
-        var wrap = element.querySelector('.card--poster, .card__poster, .poster');
-        if (wrap) {
-            var pos = getComputedStyle(wrap).position;
-            if (pos === 'static') wrap.style.position = 'relative';
-            wrap.appendChild(badge);
-        }
+        var containers = document.querySelectorAll(
+            '.items-list, .catalog__items, .selectbox-list, ' +
+            '.category-full__content, .full-start__items, ' +
+            '.scroll__body, [class*="items"], [class*="catalog"]'
+        );
+
+        containers.forEach(function (container) {
+            var hasVotes = container.querySelector(
+                '.card__vote, .vote, [class*="vote"], [class*="rating"]'
+            );
+            if (hasVotes) sortContainer(container);
+        });
     }
 
-    // ── Sort button UI ────────────────────────────────────────────────────────
+    // ── Кнопка ────────────────────────────────────────────────────────────────
 
-    var sortActive = false;
+    function createButton() {
+        if (document.getElementById('rs-btn')) return;
 
-    function toggleSortButton(active) {
-        sortActive = active;
-        var btn = document.getElementById('rs-sort-btn');
-        if (btn) {
-            btn.style.background = active ? 'rgba(76,175,80,.85)' : 'rgba(0,0,0,.65)';
-            btn.title = active ? 'Сортування: за рейтингом (вкл)' : 'Сортування: за рейтингом (викл)';
-        }
-    }
-
-    function createSortButton() {
-        if (document.getElementById('rs-sort-btn')) return;
-
-        var btn = document.createElement('button');
-        btn.id = 'rs-sort-btn';
-        btn.title = 'Сортування: за рейтингом (викл)';
-        btn.innerHTML = '&#9733; Рейтинг';
+        var btn = document.createElement('div');
+        btn.id = 'rs-btn';
+        btn.textContent = '★ Рейтинг';
         btn.style.cssText = [
             'position:fixed',
-            'bottom:24px',
-            'right:24px',
-            'z-index:9999',
-            'background:rgba(0,0,0,.65)',
+            'bottom:20px',
+            'right:20px',
+            'z-index:99999',
+            'background:rgba(20,20,20,.9)',
             'color:#fff',
-            'border:1px solid rgba(255,255,255,.25)',
-            'border-radius:6px',
-            'padding:8px 16px',
-            'font-size:14px',
+            'border:2px solid rgba(255,255,255,.3)',
+            'border-radius:8px',
+            'padding:10px 20px',
+            'font-size:15px',
+            'font-weight:600',
             'cursor:pointer',
-            'transition:background .2s',
-            'backdrop-filter:blur(4px)'
+            'user-select:none',
+            'transition:all .2s'
         ].join(';');
 
         btn.addEventListener('click', function () {
             sortActive = !sortActive;
-            toggleSortButton(sortActive);
-            applySortToCurrentView();
+            btn.style.background = sortActive
+                ? 'rgba(76,175,80,.95)'
+                : 'rgba(20,20,20,.9)';
+            btn.style.borderColor = sortActive
+                ? '#4caf50'
+                : 'rgba(255,255,255,.3)';
+            btn.textContent = sortActive ? '★ Сортування: ВКЛ' : '★ Рейтинг';
+            if (sortActive) applySort();
         });
 
         document.body.appendChild(btn);
     }
 
-    // ── Core: apply sort to whatever list is visible ──────────────────────────
-
-    function applySortToCurrentView() {
-        // Works with Lampa's card grid (.items-list, .selectbox-list, .catalog__items)
-        var selectors = [
-            '.items-list',
-            '.selectbox-list',
-            '.catalog__items',
-            '.full-start__buttons',
-            '.category-full',
-        ];
-
-        selectors.forEach(function (sel) {
-            var container = document.querySelector(sel);
-            if (!container) return;
-
-            var cards = Array.from(
-                container.querySelectorAll('.card, .selectbox-item, [data-vote]')
-            );
-            if (!cards.length) return;
-
-            var rated = cards.map(function (el) {
-                var vote =
-                    parseFloat(el.dataset.vote || 0) ||
-                    parseFloat((el.querySelector('.card__vote, .vote') || {}).textContent || 0) ||
-                    0;
-                return { el: el, vote: isNaN(vote) ? 0 : vote };
-            });
-
-            if (sortActive) {
-                rated.sort(function (a, b) { return b.vote - a.vote; });
-            }
-
-            // Re-insert in new order (or original order if sort off)
-            var fragment = document.createDocumentFragment();
-            rated.forEach(function (item) {
-                fragment.appendChild(item.el);
-                if (sortActive && item.vote > 0) {
-                    addBadgeToCard(item.el, item.vote);
-                }
-            });
-            container.appendChild(fragment);
-        });
-    }
-
-    function addBadgeToCard(el, vote) {
-        if (el.querySelector('.rs-badge')) return;
-        var color = vote >= 7 ? '#4caf50' : vote >= 5 ? '#ff9800' : '#f44336';
-        var badge = document.createElement('span');
-        badge.className = 'rs-badge';
-        badge.style.cssText = [
-            'position:absolute',
-            'top:6px',
-            'right:6px',
-            'background:' + color,
-            'color:#fff',
-            'font-size:12px',
-            'font-weight:700',
-            'padding:2px 6px',
-            'border-radius:4px',
-            'z-index:10',
-            'pointer-events:none'
-        ].join(';');
-        badge.textContent = vote.toFixed(1);
-
-        // Find the poster wrapper inside the card
-        var poster = el.querySelector('.card--poster') ||
-                     el.querySelector('.card__poster') ||
-                     el.querySelector('img');
-        var target = poster ? poster.parentElement || poster : el;
-        if (getComputedStyle(target).position === 'static') {
-            target.style.position = 'relative';
-        }
-        target.appendChild(badge);
-    }
-
-    // ── Hook into Lampa events ────────────────────────────────────────────────
+    // ── Підписка на події Lampa ───────────────────────────────────────────────
 
     function hookLampa() {
         if (typeof Lampa === 'undefined') {
-            setTimeout(hookLampa, 500);
+            setTimeout(hookLampa, 300);
             return;
         }
 
-        // Lampa.Listener — subscribe to page/component changes
-        if (Lampa.Listener && Lampa.Listener.follow) {
-            Lampa.Listener.follow('full', function (e) {
-                // 'full' fires when a catalog/collection page fully renders
-                if (e.type === 'complite' || e.type === 'complete') {
-                    if (sortActive) {
-                        setTimeout(applySortToCurrentView, 300);
-                    }
-                }
+        createButton();
+
+        if (Lampa.Listener) {
+            Lampa.Listener.follow('full', function () {
+                if (sortActive) setTimeout(applySort, 500);
             });
         }
 
-        // Also hook into catalog component if available
-        if (Lampa.Component && Lampa.Component.add) {
-            try {
-                Lampa.Component.add('rating_sort_hook', {
-                    onCreate: function () {
-                        if (sortActive) setTimeout(applySortToCurrentView, 400);
-                    }
-                });
-            } catch (e) { /* silent */ }
-        }
-
-        // Sort API results before they reach the UI
         if (Lampa.Arrays && Lampa.Arrays.extend) {
-            var originalExtend = Lampa.Arrays.extend;
+            var _extend = Lampa.Arrays.extend;
             Lampa.Arrays.extend = function (target, items) {
-                if (sortActive && Array.isArray(items)) {
-                    items = sortByRating(items);
+                if (sortActive && Array.isArray(items) && items.length) {
+                    items = items.slice().sort(function (a, b) {
+                        var ra = parseFloat(a.vote_average || (a.rating && a.rating.tmdb) || 0);
+                        var rb = parseFloat(b.vote_average || (b.rating && b.rating.tmdb) || 0);
+                        return rb - ra;
+                    });
                 }
-                return originalExtend.call(this, target, items);
+                return _extend.call(this, target, items);
             };
         }
 
-        // Hook catalog network response
-        if (Lampa.Api && Lampa.Api.results) {
-            var originalResults = Lampa.Api.results;
-            Lampa.Api.results = function (data) {
-                if (sortActive && data && Array.isArray(data.results)) {
-                    data.results = sortByRating(data.results);
-                }
-                return originalResults.apply(this, arguments);
-            };
-        }
+        var timer;
+        var obs = new MutationObserver(function (muts) {
+            if (!sortActive) return;
+            var hasCards = muts.some(function (m) {
+                return Array.from(m.addedNodes).some(function (n) {
+                    return n.nodeType === 1 && (
+                        n.classList.contains('card') ||
+                        (n.querySelector && n.querySelector('.card__vote, [class*="vote"]'))
+                    );
+                });
+            });
+            if (hasCards) {
+                clearTimeout(timer);
+                timer = setTimeout(applySort, 400);
+            }
+        });
 
-        createSortButton();
-        console.log('[' + PLUGIN_NAME + '] v' + PLUGIN_VERSION + ' завантажено');
+        obs.observe(document.body, { childList: true, subtree: true });
+
+        console.log('[RatingSort] v' + PLUGIN_VERSION + ' готовий');
     }
 
-    // ── MutationObserver: react when new cards appear ─────────────────────────
-
-    var observer = new MutationObserver(function (mutations) {
-        if (!sortActive) return;
-        var needsSort = mutations.some(function (m) {
-            return m.addedNodes.length > 0;
-        });
-        if (needsSort) {
-            clearTimeout(observer._timer);
-            observer._timer = setTimeout(applySortToCurrentView, 250);
-        }
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    // ── Lampa plugin manifest ─────────────────────────────────────────────────
-
-    var plugin = {
-        name: PLUGIN_NAME,
-        version: PLUGIN_VERSION,
-        description: 'Сортує фільми та серіали за рейтингом від вищого до нижчого',
-        author: 'Custom',
-        start: hookLampa
-    };
-
-    // Register with Lampa if available, otherwise self-start
     if (typeof Lampa !== 'undefined' && Lampa.Plugin) {
-        Lampa.Plugin.add(plugin);
+        Lampa.Plugin.add({
+            name: 'rating_sort',
+            version: PLUGIN_VERSION,
+            description: 'Сортування фільмів за рейтингом',
+            type: 'other',
+            start: hookLampa
+        });
     } else {
-        document.addEventListener('DOMContentLoaded', hookLampa);
-        setTimeout(hookLampa, 1000);
+        window.addEventListener('load', hookLampa);
+        setTimeout(hookLampa, 800);
     }
 
 })();
